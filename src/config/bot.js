@@ -25,7 +25,7 @@ export const botConfig = {
     activities: [
       {
         // Text users will see (example: "Playing /help | Titan Bot").
-        name: "Officiële Pixel Lounge bot","Moderation, Minigames, Tickets & meer",
+        name: "Officiële Pixel Lounge bot",
         // Activity type number (0 = Playing).
         type: 0, 
       },
@@ -543,6 +543,7 @@ export function getRandomColor() {
 }
 
 export default botConfig;
+
 
 
 
