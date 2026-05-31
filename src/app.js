@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import { Client, Collection, GatewayIntentBits } from 'discord.js';
 import { REST } from '@discordjs/rest';
 import express from 'express';
@@ -12,6 +12,7 @@ import { logger, startupLog, shutdownLog } from './utils/logger.js';
 import { checkBirthdays } from './services/birthdayService.js';
 import { checkGiveaways } from './services/giveawayService.js';
 import { loadCommands, registerCommands as registerSlashCommands } from './handlers/commandLoader.js';
+import { ActivityRotator } from './utils/activityRotator.js';
 
 class TitanBot extends Client {
   constructor() {
@@ -42,6 +43,7 @@ class TitanBot extends Client {
     this.cooldowns = new Collection();
     this.db = null;
     this.rest = new REST({ version: '10' }).setToken(config.bot.token);
+    this.activityRotator = null;
   }
 
   async start() {
@@ -231,6 +233,29 @@ class TitanBot extends Client {
     cron.schedule('0 6 * * *', () => checkBirthdays(this));
     cron.schedule('* * * * *', () => checkGiveaways(this));
     cron.schedule('*/15 * * * *', () => this.updateAllCounters());
+
+    // Setup activity rotation (every 5 minutes by default)
+    this.setupActivityRotation();
+  }
+
+  setupActivityRotation() {
+    // Define your bot activities here
+    const activities = [
+      {
+        name: 'Officiële Pixel Lounge bot',
+        type: 0, // Playing
+      },
+      {
+        name: 'Moderation, Minigames, Tickets & meer',
+        type: 2, // Listening
+      },
+    ];
+
+    // Create activity rotator (5 minutes interval)
+    this.activityRotator = new ActivityRotator(this, activities, 5);
+    
+    // Start rotation
+    this.activityRotator.start();
   }
 
   async updateAllCounters() {
@@ -314,6 +339,10 @@ class TitanBot extends Client {
     logger.info(`${'='.repeat(60)}`);
 
     try {
+      // Stop activity rotation
+      if (this.activityRotator) {
+        this.activityRotator.stop();
+      }
       
       logger.info('Stopping cron jobs...');
       cron.getTasks().forEach(task => task.stop());
