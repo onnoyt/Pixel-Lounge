@@ -3,7 +3,7 @@ import { logger } from './logger.js';
 
 /**
  * Ticket Panel Button Manager
- * Manages custom buttons for ticket panels
+ * Manages custom buttons for ticket panels with per-button category support
  */
 
 const BUTTON_STYLES = {
@@ -120,7 +120,8 @@ export function getDefaultTicketButtons() {
       label: 'Create Ticket',
       customId: 'create_ticket',
       style: 'primary',
-      emoji: '📩'
+      emoji: '📩',
+      categoryId: null // Will use default category
     }
   ];
 }
@@ -161,8 +162,21 @@ export function sanitizeButtonConfig(button) {
     style: VALID_STYLES.includes(button.style) ? button.style : 'primary',
     emoji: button.emoji ? String(button.emoji).substring(0, 10) : undefined,
     url: button.url ? String(button.url).substring(0, 2000) : undefined,
-    disabled: Boolean(button.disabled)
+    disabled: Boolean(button.disabled),
+    categoryId: button.categoryId ? String(button.categoryId) : null // Per-button category
   };
+}
+
+/**
+ * Get category for button (per-button or fallback to default)
+ */
+export function getButtonCategory(button, defaultCategoryId) {
+  // If button has its own category, use it
+  if (button.categoryId) {
+    return button.categoryId;
+  }
+  // Otherwise use default
+  return defaultCategoryId || null;
 }
 
 export default {
@@ -172,6 +186,7 @@ export default {
   getDefaultTicketButtons,
   getDefaultTicketManagementButtons,
   sanitizeButtonConfig,
+  getButtonCategory,
   BUTTON_STYLES,
   VALID_STYLES
 };

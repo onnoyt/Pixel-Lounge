@@ -5,7 +5,8 @@ import {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
-    MessageFlags
+    MessageFlags,
+    ChannelType
 } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed } from '../../../utils/embeds.js';
 import { getGuildConfig } from '../../../services/guildConfig.js';
@@ -21,6 +22,7 @@ import {
 /**
  * Ticket Button Configuration Module
  * Allows admins to configure up to 5 custom buttons per ticket panel
+ * Each button can have its own category
  */
 
 export async function showButtonConfigMenu(interaction, client) {
@@ -35,9 +37,10 @@ export async function showButtonConfigMenu(interaction, client) {
             fields: buttons.length > 0 ? [
                 {
                     name: 'Current Buttons',
-                    value: buttons.map((btn, idx) => 
-                        `${idx + 1}. **${btn.label}** (${btn.style}) ${btn.emoji || ''}`
-                    ).join('\\n'),
+                    value: buttons.map((btn, idx) => {
+                        const categoryInfo = btn.categoryId ? ` (Category: <#${btn.categoryId}>)` : ' (Default Category)';
+                        return `${idx + 1}. **${btn.label}** (${btn.style}) ${btn.emoji || ''}${categoryInfo}`;
+                    }).join('\\n'),
                     inline: false
                 }
             ] : [
@@ -94,60 +97,77 @@ export async function showButtonConfigMenu(interaction, client) {
     }
 }
 
-export async function showAddButtonModal(interaction) {
-    const modal = new ModalBuilder()
-        .setCustomId('ticket_btn_add_modal')
-        .setTitle('Add Custom Button');
+export async function showAddButtonModal(interaction, client) {
+    try {
+        const config = await getGuildConfig(client, interaction.guildId);
+        const guild = interaction.guild;
+        
+        // Get all categories in the guild
+        const categories = guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory);
+        const defaultCategory = config.ticketCategoryId ? 
+            guild.channels.cache.get(config.ticketCategoryId)?.name : 
+            'None (will create new)';
+        
+        const modal = new ModalBuilder()
+            .setCustomId('ticket_btn_add_modal')
+            .setTitle('Add Custom Button');
 
-    const labelInput = new TextInputBuilder()
-        .setCustomId('btn_label')
-        .setLabel('Button Label')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g., "Report Bug"')
-        .setMaxLength(80)
-        .setRequired(true);
+        const labelInput = new TextInputBuilder()
+            .setCustomId('btn_label')
+            .setLabel('Button Label')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., "Report Bug"')
+            .setMaxLength(80)
+            .setRequired(true);
 
-    const customIdInput = new TextInputBuilder()
-        .setCustomId('btn_customid')
-        .setLabel('Button Custom ID')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g., "report_bug" (no spaces)')
-        .setMaxLength(100)
-        .setRequired(true);
+        const customIdInput = new TextInputBuilder()
+            .setCustomId('btn_customid')
+            .setLabel('Button Custom ID')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., "report_bug" (no spaces)')
+            .setMaxLength(100)
+            .setRequired(true);
 
-    const styleInput = new TextInputBuilder()
-        .setCustomId('btn_style')
-        .setLabel('Button Style')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('primary, secondary, success, danger')
-        .setValue('primary')
-        .setRequired(true);
+        const styleInput = new TextInputBuilder()
+            .setCustomId('btn_style')
+            .setLabel('Button Style')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('primary, secondary, success, danger')
+            .setValue('primary')
+            .setRequired(true);
 
-    const emojiInput = new TextInputBuilder()
-        .setCustomId('btn_emoji')
-        .setLabel('Button Emoji (optional)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g., "🐛"')
-        .setMaxLength(10)
-        .setRequired(false);
+        const emojiInput = new TextInputBuilder()
+            .setCustomId('btn_emoji')
+            .setLabel('Button Emoji (optional)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., "🐛"')
+            .setMaxLength(10)
+            .setRequired(false);
 
-    const urlInput = new TextInputBuilder()
-        .setCustomId('btn_url')
-        .setLabel('Button URL (optional, for links)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('https://example.com')
-        .setMaxLength(2000)
-        .setRequired(false);
+        const categoryInput = new TextInputBuilder()
+            .setCustomId('btn_category')
+            .setLabel('Category ID (optional, leave empty for default)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder(`Default: ${defaultCategory}`)
+            .setMaxLength(20)
+            .setRequired(false);
 
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(labelInput),
-        new ActionRowBuilder().addComponents(customIdInput),
-        new ActionRowBuilder().addComponents(styleInput),
-        new ActionRowBuilder().addComponents(emojiInput),
-        new ActionRowBuilder().addComponents(urlInput)
-    );
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(labelInput),
+            new ActionRowBuilder().addComponents(customIdInput),
+            new ActionRowBuilder().addComponents(styleInput),
+            new ActionRowBuilder().addComponents(emojiInput),
+            new ActionRowBuilder().addComponents(categoryInput)
+        );
 
-    await interaction.showModal(modal);
+        await interaction.showModal(modal);
+    } catch (error) {
+        logger.error('Error showing add button modal:', error);
+        await interaction.reply({
+            embeds: [errorEmbed('Error', 'Failed to open button creation form.')],
+            flags: MessageFlags.Ephemeral
+        });
+    }
 }
 
 export async function handleAddButtonModal(interaction, client) {
@@ -166,14 +186,25 @@ export async function handleAddButtonModal(interaction, client) {
         const customId = interaction.fields.getTextInputValue('btn_customid');
         const style = interaction.fields.getTextInputValue('btn_style');
         const emoji = interaction.fields.getTextInputValue('btn_emoji') || undefined;
-        const url = interaction.fields.getTextInputValue('btn_url') || undefined;
+        const categoryId = interaction.fields.getTextInputValue('btn_category') || null;
+
+        // Validate category if provided
+        if (categoryId) {
+            const category = interaction.guild.channels.cache.get(categoryId);
+            if (!category || category.type !== ChannelType.GuildCategory) {
+                return await interaction.reply({
+                    embeds: [errorEmbed('Invalid Category', `Category ID ${categoryId} is not a valid category in this server.`)],
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        }
 
         const newButton = {
             label,
             customId,
             style,
             emoji,
-            url
+            categoryId: categoryId || null
         };
 
         const validation = validateButtonConfig(newButton);
@@ -198,8 +229,9 @@ export async function handleAddButtonModal(interaction, client) {
         const configKey = getGuildConfigKey(interaction.guildId);
         await client.db.set(configKey, config);
 
+        const categoryInfo = categoryId ? ` (Category: <#${categoryId}>)` : ' (Default Category)';
         await interaction.reply({
-            embeds: [successEmbed('Button Added', `Added button: **${label}**`)],
+            embeds: [successEmbed('Button Added', `Added button: **${label}**${categoryInfo}`)],
             flags: MessageFlags.Ephemeral
         });
 
@@ -207,6 +239,8 @@ export async function handleAddButtonModal(interaction, client) {
             guildId: interaction.guildId,
             userId: interaction.user.id,
             buttonLabel: label,
+            buttonCustomId: customId,
+            categoryId: categoryId,
             buttonCount: buttons.length
         });
 
@@ -234,7 +268,17 @@ export async function showPreviewPanel(interaction, client) {
         const embed = createEmbed({
             title: '🎫 Support Tickets (Preview)',
             description: config.ticketPanelMessage || 'Click a button below to interact.',
-            color: 0x3498db
+            color: 0x3498db,
+            fields: [
+                {
+                    name: 'Button Categories',
+                    value: buttons.map(btn => {
+                        const categoryInfo = btn.categoryId ? `<#${btn.categoryId}>` : 'Default';
+                        return `**${btn.label}** → ${categoryInfo}`;
+                    }).join('\\n'),
+                    inline: false
+                }
+            ]
         });
 
         const actionRows = createActionRowsFromButtons(buttons);
